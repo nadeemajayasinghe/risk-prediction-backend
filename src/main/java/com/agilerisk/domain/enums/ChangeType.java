@@ -1,0 +1,5 @@
+package com.agilerisk.domain.enums;
+
+public enum ChangeType {
+    SCOPE_ADDED, SCOPE_REMOVED, ACCEPTANCE_CRITERIA_CHANGED, PRIORITY_CHANGED, DESCRIPTION_UPDATED, OTHER
+}

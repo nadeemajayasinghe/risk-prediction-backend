@@ -1,0 +1,101 @@
+spring:
+  application:
+    name: risk-prediction-backend
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/agilerisk}
+    username: ${DB_USER:postgres}
+    password: ${DB_PASSWORD:postgres}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc.time_zone: UTC
+        format_sql: false
+    open-in-view: false
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+  cache:
+    type: caffeine
+    caffeine:
+      spec: maximumSize=2000,expireAfterWrite=10m
+  jackson:
+    default-property-inclusion: non_null
+
+server:
+  port: ${SERVER_PORT:8080}
+  compression:
+    enabled: true
+  error:
+    include-message: always
+
+ai:
+  over-budget:
+    base-url: ${OVERBUDGET_API_URL:http://localhost:9001}
+    path: ${OVERBUDGET_API_PATH:/predict}
+    api-key: ${OVERBUDGET_API_KEY:}
+    timeout-ms: 4000
+  requirement-change:
+    base-url: ${REQCHANGE_API_URL:http://localhost:9002}
+    path: ${REQCHANGE_API_PATH:/predict}
+    api-key: ${REQCHANGE_API_KEY:}
+    timeout-ms: 6000
+
+aggregation:
+  weights:
+    over-budget: 0.55
+    requirement-change: 0.45
+  thresholds:
+    medium: 35
+    high: 70
+
+security:
+  jwt:
+    secret: ${JWT_SECRET:change-me-please-change-me-please-change-me-please}
+    expiration-ms: 3600000
+    enabled: ${JWT_ENABLED:false}
+
+resilience4j:
+  retry:
+    instances:
+      aiClient:
+        max-attempts: 3
+        wait-duration: 400ms
+        retry-exceptions:
+          - java.io.IOException
+          - org.springframework.web.reactive.function.client.WebClientResponseException$ServiceUnavailable
+          - java.util.concurrent.TimeoutException
+  circuitbreaker:
+    instances:
+      aiClient:
+        failure-rate-threshold: 60
+        sliding-window-size: 10
+        wait-duration-in-open-state: 20s
+        permitted-number-of-calls-in-half-open-state: 3
+  timelimiter:
+    instances:
+      aiClient:
+        timeout-duration: 8s
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when_authorized
+
+logging:
+  level:
+    com.agilerisk: INFO
+    org.springframework.web.reactive.function.client: INFO

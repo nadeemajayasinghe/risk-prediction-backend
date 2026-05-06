@@ -14,6 +14,10 @@ public record SprintResponse(
         SprintStatus status,
         String teamId,
         Integer capacityPoints,
+        String teamType,
+        Integer teamSize,
+        Double complexity,
+        Double baseVelocity,
         Instant createdAt,
         Instant updatedAt
 ) { }

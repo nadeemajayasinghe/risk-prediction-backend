@@ -31,6 +31,10 @@ public class IngestionService {
                 .bugsCount(req.bugsCount())
                 .scopeChangesCount(req.scopeChangesCount())
                 .velocity(req.velocity())
+                .reworkScore(req.reworkScore())
+                .blockedTasks(req.blockedTasks())
+                .reopenedTasks(req.reopenedTasks())
+                .fatigue(req.fatigue())
                 .build());
     }
 

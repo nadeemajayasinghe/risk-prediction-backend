@@ -4,6 +4,7 @@ import com.agilerisk.domain.RequirementChange;
 import com.agilerisk.domain.Sprint;
 import com.agilerisk.domain.SprintMetric;
 import com.agilerisk.domain.UserStory;
+import com.agilerisk.domain.enums.ChangeType;
 import com.agilerisk.dto.ai.OverBudgetModelRequest;
 import com.agilerisk.dto.ai.RequirementChangeModelRequest;
 import com.agilerisk.repository.CommentRepository;
@@ -31,26 +32,27 @@ public class PayloadBuilder {
         SprintMetric latest = metricRepo.findBySprintIdOrderByRecordedAtDesc(sprint.getId())
                 .stream().findFirst().orElse(null);
 
-        List<UserStory> stories = storyRepo.findBySprintId(sprint.getId());
-        List<OverBudgetModelRequest.TaskFeature> features = stories.stream()
-                .flatMap(s -> s.getTasks().stream().map(t -> new OverBudgetModelRequest.TaskFeature(
-                        s.getId(),
-                        s.getStoryPoints(),
-                        t.getEstimatedHours(),
-                        t.getActualHours(),
-                        t.getStatus())))
-                .toList();
+        long scopeAdded = changeRepo.findBySprintIdOrderByChangedAtDesc(sprint.getId()).stream()
+                .filter(c -> c.getChangeType() == ChangeType.SCOPE_ADDED)
+                .count();
+
+        int planned   = nz(latest == null ? null : latest.getPlannedPoints());
+        int completed = nz(latest == null ? null : latest.getCompletedPoints());
 
         return new OverBudgetModelRequest(
-                sprint.getId(),
-                latest != null ? latest.getPlannedPoints() : null,
-                latest != null ? latest.getCompletedPoints() : null,
-                sprint.getCapacityPoints(),
-                latest != null ? latest.getEffortDeviation() : null,
-                latest != null ? latest.getBugsCount() : null,
-                latest != null ? latest.getScopeChangesCount() : null,
-                latest != null ? latest.getVelocity() : null,
-                features
+                emptyIfNull(sprint.getTeamType()),
+                nz(sprint.getBaseVelocity()),
+                nz(sprint.getTeamSize()),
+                nz(sprint.getComplexity()),
+                Math.max(0, planned - completed),
+                latest != null ? nz(latest.getVelocity()) : 0.0,
+                completed,
+                latest != null ? nz(latest.getEffortDeviation()) : 0.0,
+                latest != null ? nz(latest.getReworkScore()) : 0.0,
+                latest != null ? nz(latest.getBlockedTasks()) : 0,
+                latest != null ? nz(latest.getReopenedTasks()) : 0,
+                scopeAdded,
+                latest != null ? nz(latest.getFatigue()) : 0.0
         );
     }
 
@@ -85,4 +87,8 @@ public class PayloadBuilder {
                 commentTexts
         );
     }
+
+    private int nz(Integer v) { return v == null ? 0 : v; }
+    private double nz(Double v) { return v == null ? 0.0 : v; }
+    private String emptyIfNull(String v) { return v == null ? "" : v; }
 }

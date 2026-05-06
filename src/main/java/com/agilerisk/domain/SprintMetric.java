@@ -39,6 +39,18 @@ public class SprintMetric {
 
     private Double velocity;
 
+    @Column(name = "rework_score")
+    private Double reworkScore;
+
+    @Column(name = "blocked_tasks")
+    private Integer blockedTasks;
+
+    @Column(name = "reopened_tasks")
+    private Integer reopenedTasks;
+
+    @Column(name = "fatigue")
+    private Double fatigue;
+
     @Column(name = "recorded_at", nullable = false)
     private Instant recordedAt;
 

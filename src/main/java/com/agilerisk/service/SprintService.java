@@ -34,6 +34,10 @@ public class SprintService {
                 .status(req.status())
                 .teamId(req.teamId())
                 .capacityPoints(req.capacityPoints())
+                .teamType(req.teamType())
+                .teamSize(req.teamSize())
+                .complexity(req.complexity())
+                .baseVelocity(req.baseVelocity())
                 .build();
         return mapper.toResponse(repo.save(sprint));
     }
@@ -58,6 +62,10 @@ public class SprintService {
         if (req.status() != null) s.setStatus(req.status());
         if (req.teamId() != null) s.setTeamId(req.teamId());
         if (req.capacityPoints() != null) s.setCapacityPoints(req.capacityPoints());
+        if (req.teamType() != null) s.setTeamType(req.teamType());
+        if (req.teamSize() != null) s.setTeamSize(req.teamSize());
+        if (req.complexity() != null) s.setComplexity(req.complexity());
+        if (req.baseVelocity() != null) s.setBaseVelocity(req.baseVelocity());
         if (s.getEndDate().isBefore(s.getStartDate())) {
             throw new BusinessRuleException("endDate must be on/after startDate");
         }

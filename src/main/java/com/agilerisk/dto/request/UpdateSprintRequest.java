@@ -11,5 +11,9 @@ public record UpdateSprintRequest(
         LocalDate endDate,
         SprintStatus status,
         String teamId,
-        Integer capacityPoints
+        Integer capacityPoints,
+        String teamType,
+        Integer teamSize,
+        Double complexity,
+        Double baseVelocity
 ) { }

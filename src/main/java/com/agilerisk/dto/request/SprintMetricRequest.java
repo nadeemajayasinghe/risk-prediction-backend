@@ -8,5 +8,9 @@ public record SprintMetricRequest(
         Double effortDeviation,
         @PositiveOrZero Integer bugsCount,
         @PositiveOrZero Integer scopeChangesCount,
-        Double velocity
+        Double velocity,
+        Double reworkScore,
+        @PositiveOrZero Integer blockedTasks,
+        @PositiveOrZero Integer reopenedTasks,
+        Double fatigue
 ) { }

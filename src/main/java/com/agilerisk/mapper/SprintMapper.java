@@ -16,6 +16,7 @@ public class SprintMapper {
                 s.getId(), s.getName(), s.getGoal(),
                 s.getStartDate(), s.getEndDate(), s.getStatus(),
                 s.getTeamId(), s.getCapacityPoints(),
+                s.getTeamType(), s.getTeamSize(), s.getComplexity(), s.getBaseVelocity(),
                 s.getCreatedAt(), s.getUpdatedAt());
     }
 

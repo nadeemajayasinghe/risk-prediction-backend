@@ -3,6 +3,7 @@ package com.agilerisk.dto.response;
 import com.agilerisk.domain.enums.RiskLevel;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 public record AggregatedRiskResponse(
@@ -15,5 +16,6 @@ public record AggregatedRiskResponse(
         Double requirementChangeScore,
         String combinedExplanation,
         boolean degraded,
+        List<RiskFinding> findings,
         Instant createdAt
 ) { }

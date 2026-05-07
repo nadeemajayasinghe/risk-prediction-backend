@@ -7,6 +7,8 @@ import com.agilerisk.domain.enums.RiskLevel;
 import com.agilerisk.dto.ai.ModelOutcome;
 import com.agilerisk.dto.ai.OverBudgetModelRequest;
 import com.agilerisk.dto.ai.OverBudgetModelResponse;
+import com.agilerisk.dto.response.RiskFinding;
+import com.agilerisk.service.explain.OverBudgetExplainer;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import io.github.resilience4j.retry.annotation.Retry;
 import lombok.extern.slf4j.Slf4j;
@@ -16,6 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.time.Duration;
+import java.util.List;
 
 @Slf4j
 @Service
@@ -24,13 +27,16 @@ public class OverBudgetRiskClient implements AiModelClient<OverBudgetModelReques
     private final WebClient webClient;
     private final AiProperties props;
     private final AiClientSupport support;
+    private final OverBudgetExplainer explainer;
 
     public OverBudgetRiskClient(@Qualifier("overBudgetWebClient") WebClient webClient,
                                 AiProperties props,
-                                AiClientSupport support) {
+                                AiClientSupport support,
+                                OverBudgetExplainer explainer) {
         this.webClient = webClient;
         this.props = props;
         this.support = support;
+        this.explainer = explainer;
     }
 
     @Override
@@ -50,7 +56,7 @@ public class OverBudgetRiskClient implements AiModelClient<OverBudgetModelReques
             int latency = (int) (System.currentTimeMillis() - start);
             AiModelResponse audit = support.persistAudit(sprintId, ModelType.OVER_BUDGET,
                     request, raw, latency, 200, false, null);
-            return toOutcome(raw, audit);
+            return toOutcome(request, raw, audit);
         } catch (RuntimeException ex) {
             int latency = (int) (System.currentTimeMillis() - start);
             support.persistAudit(sprintId, ModelType.OVER_BUDGET, request, null, latency, null, true, ex.getMessage());
@@ -58,7 +64,7 @@ public class OverBudgetRiskClient implements AiModelClient<OverBudgetModelReques
         }
     }
 
-    private ModelOutcome toOutcome(OverBudgetModelResponse raw, AiModelResponse audit) {
+    private ModelOutcome toOutcome(OverBudgetModelRequest request, OverBudgetModelResponse raw, AiModelResponse audit) {
         if (raw == null) {
             return ModelOutcome.fallback(ModelType.OVER_BUDGET, "Empty response");
         }
@@ -66,6 +72,7 @@ public class OverBudgetRiskClient implements AiModelClient<OverBudgetModelReques
         double riskScore = computeRiskScore(raw);
         Double topProb = topProbability(raw);
         String explanation = buildExplanation(raw);
+        List<RiskFinding> findings = explainer.explain(request);
         return new ModelOutcome(
                 ModelType.OVER_BUDGET,
                 riskScore,
@@ -74,7 +81,8 @@ public class OverBudgetRiskClient implements AiModelClient<OverBudgetModelReques
                 explanation,
                 false,
                 audit != null ? audit.getId() : null,
-                audit != null ? audit.getLatencyMs() : null
+                audit != null ? audit.getLatencyMs() : null,
+                findings
         );
     }
 

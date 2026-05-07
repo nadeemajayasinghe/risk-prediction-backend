@@ -56,7 +56,8 @@ public class AiClientSupport {
                 raw.explanation(),
                 false,
                 audit != null ? audit.getId() : null,
-                audit != null ? audit.getLatencyMs() : null
+                audit != null ? audit.getLatencyMs() : null,
+                java.util.List.of()
         );
     }
 

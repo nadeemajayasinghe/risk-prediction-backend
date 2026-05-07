@@ -14,6 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 
@@ -48,7 +49,7 @@ public class RiskOrchestrationService {
             log.info("Sprint {} evaluation: ob={} rc={} (degraded ob={} rc={})",
                     sprintId, ob.riskScore(), rc.riskScore(), ob.degraded(), rc.degraded());
             AggregatedRiskResult result = aggregationService.aggregate(sprint, ob, rc);
-            return mapper.toResponse(result);
+            return mapper.toResponse(result, List.of(ob, rc));
         } catch (InterruptedException | ExecutionException ex) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("Failed to evaluate sprint risk", ex);

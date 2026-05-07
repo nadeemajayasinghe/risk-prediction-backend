@@ -20,3 +20,20 @@ logs/
 application-local.yml
 application-local.properties
 .env
+
+# Python virtual envs and caches
+**/.venv/
+**/venv/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# ML model artifacts — too large for git, distribute separately
+*.pkl
+*.joblib
+*.h5
+*.onnx

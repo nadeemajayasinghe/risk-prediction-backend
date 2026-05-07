@@ -2,6 +2,7 @@ package com.agilerisk.dto.ai;
 
 import com.agilerisk.domain.enums.ModelType;
 import com.agilerisk.domain.enums.RiskLevel;
+import com.agilerisk.dto.response.FeatureImpact;
 import com.agilerisk.dto.response.RiskFinding;
 
 import java.util.List;
@@ -15,10 +16,13 @@ public record ModelOutcome(
         boolean degraded,
         Long aiResponseId,
         Integer latencyMs,
-        List<RiskFinding> findings
+        List<RiskFinding> findings,
+        List<FeatureImpact> featureImpacts,
+        Double baselineRiskScore
 ) {
     public static ModelOutcome fallback(ModelType type, String reason) {
         return new ModelOutcome(type, 50.0, RiskLevel.UNKNOWN, null,
-                "Fallback: " + reason, true, null, null, List.of());
+                "Fallback: " + reason, true, null, null,
+                List.of(), List.of(), null);
     }
 }

@@ -3,8 +3,10 @@ package com.agilerisk.mapper;
 import com.agilerisk.domain.AggregatedRiskResult;
 import com.agilerisk.domain.RiskPrediction;
 import com.agilerisk.domain.Sprint;
+import com.agilerisk.domain.enums.ModelType;
 import com.agilerisk.dto.ai.ModelOutcome;
 import com.agilerisk.dto.response.AggregatedRiskResponse;
+import com.agilerisk.dto.response.FeatureImpact;
 import com.agilerisk.dto.response.RiskFinding;
 import com.agilerisk.dto.response.RiskPredictionResponse;
 import com.agilerisk.dto.response.SprintResponse;
@@ -33,21 +35,34 @@ public class SprintMapper {
                 p.getExplanation(), p.getCreatedAt());
     }
 
-    /** Used by reporting endpoints — no live outcomes available, so findings are empty. */
+    /** Used by reporting endpoints — no live outcomes available, so derived fields are empty. */
     public AggregatedRiskResponse toResponse(AggregatedRiskResult a) {
         return toResponse(a, List.of());
     }
 
-    /** Used right after an evaluation — merges findings from each model outcome. */
+    /** Used right after an evaluation — merges findings + over-budget feature impacts from outcomes. */
     public AggregatedRiskResponse toResponse(AggregatedRiskResult a, Collection<ModelOutcome> outcomes) {
         List<RiskFinding> findings = outcomes.stream()
                 .filter(Objects::nonNull)
                 .flatMap(o -> o.findings() == null ? java.util.stream.Stream.<RiskFinding>empty() : o.findings().stream())
                 .toList();
+
+        ModelOutcome overBudget = outcomes.stream()
+                .filter(Objects::nonNull)
+                .filter(o -> o.modelType() == ModelType.OVER_BUDGET)
+                .findFirst()
+                .orElse(null);
+
+        List<FeatureImpact> impacts = (overBudget != null && overBudget.featureImpacts() != null)
+                ? overBudget.featureImpacts() : List.of();
+        Double baseline = overBudget != null ? overBudget.baselineRiskScore() : null;
+
         return new AggregatedRiskResponse(
                 a.getId(), a.getSprint().getId(), a.getEvaluationId(),
                 a.getOverallScore(), a.getOverallLevel(),
                 a.getOverBudgetScore(), a.getRequirementChangeScore(),
-                a.getCombinedExplanation(), a.isDegraded(), findings, a.getCreatedAt());
+                a.getCombinedExplanation(), a.isDegraded(),
+                findings, impacts, baseline,
+                a.getCreatedAt());
     }
 }

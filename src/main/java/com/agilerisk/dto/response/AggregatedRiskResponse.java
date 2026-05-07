@@ -17,5 +17,7 @@ public record AggregatedRiskResponse(
         String combinedExplanation,
         boolean degraded,
         List<RiskFinding> findings,
+        List<FeatureImpact> overBudgetFeatureImpacts,
+        Double overBudgetBaselineRiskScore,
         Instant createdAt
 ) { }

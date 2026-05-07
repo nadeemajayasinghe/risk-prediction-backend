@@ -73,6 +73,8 @@ public class OverBudgetRiskClient implements AiModelClient<OverBudgetModelReques
         Double topProb = topProbability(raw);
         String explanation = buildExplanation(raw);
         List<RiskFinding> findings = explainer.explain(request);
+        List<com.agilerisk.dto.response.FeatureImpact> impacts =
+                raw.featureImpacts() != null ? raw.featureImpacts() : List.of();
         return new ModelOutcome(
                 ModelType.OVER_BUDGET,
                 riskScore,
@@ -82,7 +84,9 @@ public class OverBudgetRiskClient implements AiModelClient<OverBudgetModelReques
                 false,
                 audit != null ? audit.getId() : null,
                 audit != null ? audit.getLatencyMs() : null,
-                findings
+                findings,
+                impacts,
+                raw.baselineRiskScore()
         );
     }
 

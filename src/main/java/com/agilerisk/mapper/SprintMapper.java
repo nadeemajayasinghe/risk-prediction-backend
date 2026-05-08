@@ -40,29 +40,37 @@ public class SprintMapper {
         return toResponse(a, List.of());
     }
 
-    /** Used right after an evaluation — merges findings + over-budget feature impacts from outcomes. */
+    /** Used right after an evaluation — merges findings + per-model feature impacts from outcomes. */
     public AggregatedRiskResponse toResponse(AggregatedRiskResult a, Collection<ModelOutcome> outcomes) {
         List<RiskFinding> findings = outcomes.stream()
                 .filter(Objects::nonNull)
                 .flatMap(o -> o.findings() == null ? java.util.stream.Stream.<RiskFinding>empty() : o.findings().stream())
                 .toList();
 
-        ModelOutcome overBudget = outcomes.stream()
-                .filter(Objects::nonNull)
-                .filter(o -> o.modelType() == ModelType.OVER_BUDGET)
-                .findFirst()
-                .orElse(null);
+        ModelOutcome ob = pick(outcomes, ModelType.OVER_BUDGET);
+        ModelOutcome rc = pick(outcomes, ModelType.REQUIREMENT_CHANGE);
 
-        List<FeatureImpact> impacts = (overBudget != null && overBudget.featureImpacts() != null)
-                ? overBudget.featureImpacts() : List.of();
-        Double baseline = overBudget != null ? overBudget.baselineRiskScore() : null;
+        List<FeatureImpact> obImpacts = (ob != null && ob.featureImpacts() != null) ? ob.featureImpacts() : List.of();
+        List<FeatureImpact> rcImpacts = (rc != null && rc.featureImpacts() != null) ? rc.featureImpacts() : List.of();
+        Double obBaseline = ob != null ? ob.baselineRiskScore() : null;
+        Double rcBaseline = rc != null ? rc.baselineRiskScore() : null;
 
         return new AggregatedRiskResponse(
                 a.getId(), a.getSprint().getId(), a.getEvaluationId(),
                 a.getOverallScore(), a.getOverallLevel(),
                 a.getOverBudgetScore(), a.getRequirementChangeScore(),
                 a.getCombinedExplanation(), a.isDegraded(),
-                findings, impacts, baseline,
+                findings,
+                obImpacts, obBaseline,
+                rcImpacts, rcBaseline,
                 a.getCreatedAt());
+    }
+
+    private ModelOutcome pick(Collection<ModelOutcome> outcomes, ModelType type) {
+        return outcomes.stream()
+                .filter(Objects::nonNull)
+                .filter(o -> o.modelType() == type)
+                .findFirst()
+                .orElse(null);
     }
 }

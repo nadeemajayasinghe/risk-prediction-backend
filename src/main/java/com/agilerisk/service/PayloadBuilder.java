@@ -15,7 +15,10 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.Comparator;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.List;
 
 @Component
@@ -56,39 +59,76 @@ public class PayloadBuilder {
         );
     }
 
+    /**
+     * Builds the 7-feature payload required by the requirement-change model.
+     * Features are derived from existing sprint data:
+     *
+     * <ul>
+     *   <li><b>baseline_story_count</b>: stories created before/at sprint start</li>
+     *   <li><b>updated_story_count</b>: stories whose latest update happened materially after creation
+     *       (proxy: updated_at &gt; created_at + 60s) OR after the sprint started</li>
+     *   <li><b>story_change_ratio</b>: updated / max(baseline, 1)</li>
+     *   <li><b>acceptance_criteria_changes</b>: requirement_changes rows of type ACCEPTANCE_CRITERIA_CHANGED</li>
+     *   <li><b>change_requests_count</b>: total requirement_changes rows for this sprint</li>
+     *   <li><b>comments_on_stories</b>: total comments across all stories in the sprint</li>
+     *   <li><b>requirement_volatility_score</b>: change_requests / baseline_story_count, capped at 1.0</li>
+     * </ul>
+     */
     @Transactional(readOnly = true)
     public RequirementChangeModelRequest buildRequirementChange(Sprint sprint) {
         List<UserStory> stories = storyRepo.findBySprintId(sprint.getId());
-
-        List<RequirementChangeModelRequest.StoryText> storyTexts = stories.stream()
-                .map(s -> new RequirementChangeModelRequest.StoryText(
-                        s.getId(), s.getExternalKey(), s.getTitle(), s.getDescription()))
-                .toList();
-
         List<RequirementChange> changes = changeRepo.findBySprintIdOrderByChangedAtDesc(sprint.getId());
-        List<RequirementChangeModelRequest.ChangeRecord> changeRecords = changes.stream()
-                .map(c -> new RequirementChangeModelRequest.ChangeRecord(
-                        c.getChangeType().name(), c.getDescription(), c.getRequestedBy(),
-                        c.getChangedAt() == null ? null : c.getChangedAt().toString()))
-                .toList();
 
-        List<RequirementChangeModelRequest.CommentText> commentTexts = stories.stream()
-                .flatMap(s -> commentRepo.findByStoryId(s.getId()).stream()
-                        .map(c -> new RequirementChangeModelRequest.CommentText(
-                                s.getId(), c.getAuthor(), c.getBody())))
-                .sorted(Comparator.comparing(RequirementChangeModelRequest.CommentText::storyId))
-                .toList();
+        Instant sprintStart = sprint.getStartDate() == null
+                ? Instant.now()
+                : sprint.getStartDate().atStartOfDay().toInstant(ZoneOffset.UTC);
+
+        int baselineCount = (int) stories.stream()
+                .filter(s -> s.getCreatedAt() != null && !s.getCreatedAt().isAfter(sprintStart))
+                .count();
+        if (baselineCount == 0 && !stories.isEmpty()) {
+            // Fall back to total stories — handles the common case where stories were created
+            // close to or just after sprint start during ingestion testing.
+            baselineCount = stories.size();
+        }
+
+        int updatedCount = (int) stories.stream()
+                .filter(s -> s.getCreatedAt() != null && s.getUpdatedAt() != null)
+                .filter(s -> Duration.between(s.getCreatedAt(), s.getUpdatedAt()).toSeconds() > 60
+                          || s.getUpdatedAt().isAfter(sprintStart))
+                .count();
+
+        double changeRatio = baselineCount > 0 ? (double) updatedCount / baselineCount : 0.0;
+        if (changeRatio > 1.0) changeRatio = 1.0;
+
+        int acChanges = (int) changes.stream()
+                .filter(c -> c.getChangeType() == ChangeType.ACCEPTANCE_CRITERIA_CHANGED)
+                .count();
+        int crCount = changes.size();
+
+        int totalComments = stories.stream()
+                .mapToInt(s -> commentRepo.findByStoryId(s.getId()).size())
+                .sum();
+
+        double volatility = baselineCount > 0 ? (double) crCount / baselineCount : 0.0;
+        if (volatility > 1.0) volatility = 1.0;
 
         return new RequirementChangeModelRequest(
-                sprint.getId(),
-                sprint.getGoal(),
-                storyTexts,
-                changeRecords,
-                commentTexts
+                baselineCount,
+                updatedCount,
+                round4(changeRatio),
+                acChanges,
+                crCount,
+                totalComments,
+                round4(volatility)
         );
     }
 
-    private int nz(Integer v) { return v == null ? 0 : v; }
-    private double nz(Double v) { return v == null ? 0.0 : v; }
-    private String emptyIfNull(String v) { return v == null ? "" : v; }
+    private static int nz(Integer v) { return v == null ? 0 : v; }
+    private static double nz(Double v) { return v == null ? 0.0 : v; }
+    private static String emptyIfNull(String v) { return v == null ? "" : v; }
+    private static double round4(double v) { return Math.round(v * 10000.0) / 10000.0; }
+
+    @SuppressWarnings("unused")
+    private static LocalDate atStart(LocalDate d) { return d; } // reserved for future date utilities
 }

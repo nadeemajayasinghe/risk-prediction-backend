@@ -1,15 +1,13 @@
 package com.agilerisk.dto.ai;
 
-import java.util.List;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 public record RequirementChangeModelRequest(
-        Long sprintId,
-        String sprintGoal,
-        List<StoryText> stories,
-        List<ChangeRecord> changes,
-        List<CommentText> comments
-) {
-    public record StoryText(Long id, String externalKey, String title, String description) { }
-    public record ChangeRecord(String changeType, String description, String requestedBy, String changedAt) { }
-    public record CommentText(Long storyId, String author, String body) { }
-}
+        @JsonProperty("baseline_story_count")         int baselineStoryCount,
+        @JsonProperty("updated_story_count")          int updatedStoryCount,
+        @JsonProperty("story_change_ratio")           double storyChangeRatio,
+        @JsonProperty("acceptance_criteria_changes") int acceptanceCriteriaChanges,
+        @JsonProperty("change_requests_count")        int changeRequestsCount,
+        @JsonProperty("comments_on_stories")          int commentsOnStories,
+        @JsonProperty("requirement_volatility_score") double requirementVolatilityScore
+) { }

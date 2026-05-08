@@ -19,5 +19,7 @@ public record AggregatedRiskResponse(
         List<RiskFinding> findings,
         List<FeatureImpact> overBudgetFeatureImpacts,
         Double overBudgetBaselineRiskScore,
+        List<FeatureImpact> requirementChangeFeatureImpacts,
+        Double requirementChangeBaselineRiskScore,
         Instant createdAt
 ) { }

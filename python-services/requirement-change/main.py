@@ -1,10 +1,11 @@
-"""Over-budget sprint risk prediction service.
+"""Requirement-change risk prediction service.
 
 Loads a trained CatBoostClassifier from model.pkl and serves predictions
-on POST /predict, matching the contract used by the Spring Boot backend.
+on POST /predict, matching the contract:
 
-Also returns SHAP-based per-feature contributions so the backend / dashboard
-can show *why* the model made the prediction it did.
+  Input: 7 numeric sprint features.
+  Output: { riskLabel, confidence (0-1), probabilities {Low,Medium,High} }
+          + optional SHAP-based featureImpacts and baselineRiskScore
 """
 from __future__ import annotations
 
@@ -21,27 +22,21 @@ from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, Field
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-log = logging.getLogger("overbudget")
+log = logging.getLogger("requirement_change")
 
 MODEL_PATH = os.getenv("MODEL_PATH", os.path.join(os.path.dirname(__file__), "model.pkl"))
 
 FEATURES: list[str] = [
-    "team_type",
-    "base_velocity",
-    "team_size",
-    "complexity",
-    "remaining_work",
-    "velocity",
-    "completed_story_points",
-    "effort_deviation",
-    "rework_score",
-    "blocked_tasks",
-    "reopened_tasks",
-    "scope_added",
-    "fatigue",
+    "baseline_story_count",
+    "updated_story_count",
+    "story_change_ratio",
+    "acceptance_criteria_changes",
+    "change_requests_count",
+    "comments_on_stories",
+    "requirement_volatility_score",
 ]
 N_FEATURES = len(FEATURES)
-N_CLASSES = 3  # Low / Medium / High
+N_CLASSES = 3
 
 LABELS: dict[int, str] = {0: "Low", 1: "Medium", 2: "High"}
 
@@ -49,25 +44,20 @@ state: dict[str, Any] = {}
 
 
 class PredictRequest(BaseModel):
-    team_type: str = Field(..., description="Categorical team identifier handled natively by CatBoost")
-    base_velocity: float
-    team_size: int
-    complexity: float
-    remaining_work: float
-    velocity: float
-    completed_story_points: float
-    effort_deviation: float
-    rework_score: float
-    blocked_tasks: int
-    reopened_tasks: int
-    scope_added: float
-    fatigue: float
+    baseline_story_count: int
+    updated_story_count: int
+    story_change_ratio: float
+    acceptance_criteria_changes: int
+    change_requests_count: int
+    comments_on_stories: int
+    requirement_volatility_score: float
 
 
 class Probabilities(BaseModel):
-    low: float
-    medium: float
-    high: float
+    """PascalCase keys per the contract (Low/Medium/High instead of low/medium/high)."""
+    Low: float
+    Medium: float
+    High: float
 
 
 class ShapByClass(BaseModel):
@@ -86,7 +76,7 @@ class FeatureImpact(BaseModel):
 
 class PredictResponse(BaseModel):
     riskLabel: Literal["Low", "Medium", "High"]
-    confidence: float
+    confidence: float = Field(..., description="Highest class probability, in [0,1]")
     probabilities: Probabilities
     featureImpacts: list[FeatureImpact] | None = None
     baselineRiskScore: float | None = None
@@ -95,6 +85,8 @@ class PredictResponse(BaseModel):
 def _load_model(path: str):
     """Try every common save format used in ML notebooks: raw pickle, joblib, CatBoost native."""
     errors: list[str] = []
+
+    # 1) raw pickle.dump(model, f)
     try:
         with open(path, "rb") as f:
             m = pickle.load(f)
@@ -102,6 +94,8 @@ def _load_model(path: str):
         return m
     except Exception as ex:
         errors.append(f"pickle.load: {type(ex).__name__}: {ex}")
+
+    # 2) joblib.dump(model, path) — common in sklearn / sometimes used for CatBoost too
     try:
         import joblib
         m = joblib.load(path)
@@ -109,6 +103,8 @@ def _load_model(path: str):
         return m
     except Exception as ex:
         errors.append(f"joblib.load: {type(ex).__name__}: {ex}")
+
+    # 3) model.save_model(path) — CatBoost's native binary format
     try:
         from catboost import CatBoostClassifier
         m = CatBoostClassifier()
@@ -117,6 +113,7 @@ def _load_model(path: str):
         return m
     except Exception as ex:
         errors.append(f"CatBoost.load_model: {type(ex).__name__}: {ex}")
+
     raise RuntimeError(
         "Could not load model from "
         + path
@@ -140,7 +137,7 @@ async def lifespan(_: FastAPI):
     state.clear()
 
 
-app = FastAPI(title="Over-Budget Risk Service", version="1.2.0", lifespan=lifespan)
+app = FastAPI(title="Requirement-Change Risk Service", version="1.0.0", lifespan=lifespan)
 
 
 @app.get("/health")
@@ -149,38 +146,28 @@ def health() -> dict[str, str]:
 
 
 def _resolve_cat_features(model) -> list[str]:
-    """Return the categorical feature names the model was trained with."""
+    """Return categorical feature names the model was trained with (none expected for this model)."""
     try:
         indices = list(model.get_cat_feature_indices())
         return [FEATURES[i] for i in indices]
     except Exception:
-        return ["team_type"]  # we know team_type is the only categorical
+        return []
 
 
 def _normalise_shap_shape(shap: np.ndarray) -> np.ndarray | None:
-    """Coerce CatBoost's SHAP output into shape (n_classes, n_features + 1).
-
-    Different CatBoost versions / build types return:
-      A) 3D (n_samples, n_classes, n_features + 1) — modern multiclass
-      B) 2D flat (n_samples, n_classes * (n_features + 1)) — older multiclass
-      C) 2D (n_samples, n_features + 1) — binary  (we don't expect this)
-    """
+    """Coerce CatBoost SHAP output into shape (N_CLASSES, N_FEATURES + 1)."""
     expected_per_class = N_FEATURES + 1
     expected_flat = N_CLASSES * expected_per_class
 
     if shap.ndim == 3:
         if shap.shape[0] >= 1 and shap.shape[1] == N_CLASSES and shap.shape[2] == expected_per_class:
-            return shap[0]  # (n_classes, n_features + 1)
-        log.warning("SHAP 3D shape %s does not match expected (n,%d,%d)",
-                    shap.shape, N_CLASSES, expected_per_class)
+            return shap[0]
+        log.warning("SHAP 3D shape %s does not match expected (n,%d,%d)", shap.shape, N_CLASSES, expected_per_class)
         return None
 
     if shap.ndim == 2:
         if shap.shape[0] >= 1 and shap.shape[1] == expected_flat:
             return shap[0].reshape(N_CLASSES, expected_per_class)
-        if shap.shape[0] >= 1 and shap.shape[1] == expected_per_class:
-            log.warning("SHAP returned single-class shape %s — model may be binary, can't compute multi-class impacts", shap.shape)
-            return None
         log.warning("SHAP 2D shape %s — unable to interpret", shap.shape)
         return None
 
@@ -189,40 +176,23 @@ def _normalise_shap_shape(shap: np.ndarray) -> np.ndarray | None:
 
 
 def _compute_shap(model, row: pd.DataFrame) -> np.ndarray | None:
-    """Run model.get_feature_importance() with several fallbacks across CatBoost versions."""
     cat_names = _resolve_cat_features(model)
     pool = Pool(data=row, cat_features=cat_names if cat_names else None)
-
-    attempts = [
-        {"type": "ShapValues"},  # CatBoost 1.x returns raw (log-odds) SHAP values
-    ]
-    last_err: Exception | None = None
-    for kwargs in attempts:
-        try:
-            shap = model.get_feature_importance(pool, **kwargs)
-            log.info("SHAP computed with kwargs=%s, shape=%s", kwargs, getattr(shap, "shape", None))
-            return shap
-        except Exception as ex:
-            last_err = ex
-            log.warning("SHAP attempt with kwargs=%s failed: %s", kwargs, ex)
-    if last_err is not None:
-        log.warning("All SHAP attempts failed; last error: %s", last_err)
-    return None
+    try:
+        shap = model.get_feature_importance(pool, type="ShapValues")
+        log.info("SHAP computed, shape=%s", getattr(shap, "shape", None))
+        return shap
+    except Exception as ex:
+        log.warning("SHAP computation failed: %s", ex)
+        return None
 
 
 def _compute_feature_impacts(model, row: pd.DataFrame, proba: np.ndarray) -> tuple[list[FeatureImpact] | None, float | None]:
-    """Compute SHAP values and translate them into per-feature contributions on the 0-100 risk scale.
-
-    CatBoost returns SHAP values in raw (log-odds) space. We convert each feature's per-class
-    log-odds contribution into a probability-space contribution using the softmax linearisation:
+    """Convert CatBoost log-odds SHAP into probability-space risk contributions
+    via softmax linearisation, matching the over-budget service.
 
         dP[c] / dz[c'] = P[c] * (delta_{c,c'} - P[c'])
-
-    Then the risk score contribution per feature i is:
-
-        50 * delta_P[Medium, i] + 100 * delta_P[High, i]
-
-    matching the Java aggregator's risk score formula.
+        risk_score = 50*P(Medium) + 100*P(High)
     """
     shap_raw = _compute_shap(model, row)
     if shap_raw is None:
@@ -232,19 +202,12 @@ def _compute_feature_impacts(model, row: pd.DataFrame, proba: np.ndarray) -> tup
     if matrix is None:
         return None, None
 
-    # matrix shape: (N_CLASSES, N_FEATURES + 1) — last column is bias (log-odds baseline)
-    shap_log = matrix[:, :N_FEATURES]   # (N_CLASSES, N_FEATURES)
-    bias_log = matrix[:, N_FEATURES]    # (N_CLASSES,)
+    shap_log = matrix[:, :N_FEATURES]
+    p = np.asarray(proba, dtype=float)
+    weighted_mean = (p[:, None] * shap_log).sum(axis=0)
+    delta_p = p[:, None] * (shap_log - weighted_mean[None, :])
 
-    # Convert log-odds SHAP -> probability-space SHAP via softmax linearisation
-    p = np.asarray(proba, dtype=float)  # (N_CLASSES,)
-    weighted_mean = (p[:, None] * shap_log).sum(axis=0)              # (N_FEATURES,)
-    delta_p = p[:, None] * (shap_log - weighted_mean[None, :])       # (N_CLASSES, N_FEATURES)
-
-    # Per-feature risk-score contribution (matches OverBudgetRiskClient.computeRiskScore)
     risk_contributions = 50.0 * delta_p[1, :] + 100.0 * delta_p[2, :]
-
-    # Baseline risk score = current_risk_score - sum of contributions
     current_risk = 50.0 * float(p[1]) + 100.0 * float(p[2])
     baseline_risk = current_risk - float(risk_contributions.sum())
 
@@ -265,7 +228,6 @@ def _compute_feature_impacts(model, row: pd.DataFrame, proba: np.ndarray) -> tup
             value=raw_val,
             riskContribution=round(rc, 4),
             shapByClass=ShapByClass(
-                # Expose raw log-odds SHAP per class — researchers expect this when citing SHAP.
                 low=round(float(shap_log[0, i]), 4),
                 medium=round(float(shap_log[1, i]), 4),
                 high=round(float(shap_log[2, i]), 4),
@@ -298,15 +260,16 @@ def predict(req: PredictRequest) -> PredictResponse:
         )
 
     idx = int(np.argmax(proba))
+    confidence = round(float(proba[idx]), 4)  # 0-1 per the contract
     impacts, baseline = _compute_feature_impacts(model, row, proba)
 
     return PredictResponse(
         riskLabel=LABELS[idx],
-        confidence=round(float(proba[idx]) * 100.0, 2),
+        confidence=confidence,
         probabilities=Probabilities(
-            low=round(float(proba[0]), 4),
-            medium=round(float(proba[1]), 4),
-            high=round(float(proba[2]), 4),
+            Low=round(float(proba[0]), 4),
+            Medium=round(float(proba[1]), 4),
+            High=round(float(proba[2]), 4),
         ),
         featureImpacts=impacts,
         baselineRiskScore=baseline,

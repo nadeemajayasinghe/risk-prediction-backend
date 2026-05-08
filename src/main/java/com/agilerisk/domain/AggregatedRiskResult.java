@@ -40,6 +40,9 @@ public class AggregatedRiskResult {
     @Column(name = "requirement_change_score")
     private Double requirementChangeScore;
 
+    @Column(name = "communication_collaboration_score")
+    private Double communicationCollaborationScore;
+
     @Column(name = "combined_explanation", columnDefinition = "TEXT")
     private String combinedExplanation;
 

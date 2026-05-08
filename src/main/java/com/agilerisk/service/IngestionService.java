@@ -35,6 +35,8 @@ public class IngestionService {
                 .blockedTasks(req.blockedTasks())
                 .reopenedTasks(req.reopenedTasks())
                 .fatigue(req.fatigue())
+                .avgResponseTimeHours(req.avgResponseTimeHours())
+                .inactiveDays(req.inactiveDays())
                 .build());
     }
 

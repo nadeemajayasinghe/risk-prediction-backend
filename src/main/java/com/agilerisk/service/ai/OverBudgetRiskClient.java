@@ -86,7 +86,9 @@ public class OverBudgetRiskClient implements AiModelClient<OverBudgetModelReques
                 audit != null ? audit.getLatencyMs() : null,
                 findings,
                 impacts,
-                raw.baselineRiskScore()
+                raw.baselineRiskScore(),
+                List.of(),
+                null
         );
     }
 

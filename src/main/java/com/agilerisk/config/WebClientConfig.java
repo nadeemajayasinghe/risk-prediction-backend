@@ -27,6 +27,11 @@ public class WebClientConfig {
         return buildClient(props.getRequirementChange());
     }
 
+    @Bean(name = "communicationCollaborationWebClient")
+    public WebClient communicationCollaborationWebClient(AiProperties props) {
+        return buildClient(props.getCommunicationCollaboration());
+    }
+
     private WebClient buildClient(AiProperties.Endpoint cfg) {
         HttpClient httpClient = HttpClient.create()
                 .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 2000)

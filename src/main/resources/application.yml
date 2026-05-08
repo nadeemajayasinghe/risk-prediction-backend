@@ -43,11 +43,17 @@ ai:
     path: ${REQCHANGE_API_PATH:/predict}
     api-key: ${REQCHANGE_API_KEY:}
     timeout-ms: 6000
+  communication-collaboration:
+    base-url: ${CC_API_URL:http://localhost:9003}
+    path: ${CC_API_PATH:/predict}
+    api-key: ${CC_API_KEY:}
+    timeout-ms: 35000
 
 aggregation:
   weights:
-    over-budget: 0.55
-    requirement-change: 0.45
+    over-budget: 0.40
+    requirement-change: 0.30
+    communication-collaboration: 0.30
   thresholds:
     medium: 35
     high: 70

@@ -51,6 +51,12 @@ public class SprintMetric {
     @Column(name = "fatigue")
     private Double fatigue;
 
+    @Column(name = "avg_response_time_hours")
+    private Integer avgResponseTimeHours;
+
+    @Column(name = "inactive_days")
+    private Integer inactiveDays;
+
     @Column(name = "recorded_at", nullable = false)
     private Instant recordedAt;
 

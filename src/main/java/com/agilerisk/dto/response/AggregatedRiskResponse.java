@@ -14,6 +14,7 @@ public record AggregatedRiskResponse(
         RiskLevel overallLevel,
         Double overBudgetScore,
         Double requirementChangeScore,
+        Double communicationCollaborationScore,
         String combinedExplanation,
         boolean degraded,
         List<RiskFinding> findings,
@@ -21,5 +22,7 @@ public record AggregatedRiskResponse(
         Double overBudgetBaselineRiskScore,
         List<FeatureImpact> requirementChangeFeatureImpacts,
         Double requirementChangeBaselineRiskScore,
+        List<String> communicationCollaborationRecommendations,
+        String communicationCollaborationLlmExplanation,
         Instant createdAt
 ) { }

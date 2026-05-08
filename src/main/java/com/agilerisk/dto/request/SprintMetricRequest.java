@@ -12,5 +12,7 @@ public record SprintMetricRequest(
         Double reworkScore,
         @PositiveOrZero Integer blockedTasks,
         @PositiveOrZero Integer reopenedTasks,
-        Double fatigue
+        Double fatigue,
+        @PositiveOrZero Integer avgResponseTimeHours,
+        @PositiveOrZero Integer inactiveDays
 ) { }

@@ -10,6 +10,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class AiProperties {
     private Endpoint overBudget = new Endpoint();
     private Endpoint requirementChange = new Endpoint();
+    private Endpoint communicationCollaboration = new Endpoint();
 
     @Getter
     @Setter

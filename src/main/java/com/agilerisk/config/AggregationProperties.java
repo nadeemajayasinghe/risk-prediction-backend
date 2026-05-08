@@ -14,8 +14,9 @@ public class AggregationProperties {
     @Getter
     @Setter
     public static class Weights {
-        private double overBudget = 0.55;
-        private double requirementChange = 0.45;
+        private double overBudget = 0.40;
+        private double requirementChange = 0.30;
+        private double communicationCollaboration = 0.30;
     }
 
     @Getter

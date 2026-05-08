@@ -49,20 +49,26 @@ public class SprintMapper {
 
         ModelOutcome ob = pick(outcomes, ModelType.OVER_BUDGET);
         ModelOutcome rc = pick(outcomes, ModelType.REQUIREMENT_CHANGE);
+        ModelOutcome cc = pick(outcomes, ModelType.COMMUNICATION_COLLABORATION);
 
         List<FeatureImpact> obImpacts = (ob != null && ob.featureImpacts() != null) ? ob.featureImpacts() : List.of();
         List<FeatureImpact> rcImpacts = (rc != null && rc.featureImpacts() != null) ? rc.featureImpacts() : List.of();
         Double obBaseline = ob != null ? ob.baselineRiskScore() : null;
         Double rcBaseline = rc != null ? rc.baselineRiskScore() : null;
 
+        List<String> ccRecs = (cc != null && cc.recommendations() != null) ? cc.recommendations() : List.of();
+        String ccLlm = cc != null ? cc.llmExplanation() : null;
+
         return new AggregatedRiskResponse(
                 a.getId(), a.getSprint().getId(), a.getEvaluationId(),
                 a.getOverallScore(), a.getOverallLevel(),
                 a.getOverBudgetScore(), a.getRequirementChangeScore(),
+                a.getCommunicationCollaborationScore(),
                 a.getCombinedExplanation(), a.isDegraded(),
                 findings,
                 obImpacts, obBaseline,
                 rcImpacts, rcBaseline,
+                ccRecs, ccLlm,
                 a.getCreatedAt());
     }
 

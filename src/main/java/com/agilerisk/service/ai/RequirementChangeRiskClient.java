@@ -86,7 +86,9 @@ public class RequirementChangeRiskClient implements AiModelClient<RequirementCha
                 audit != null ? audit.getLatencyMs() : null,
                 findings,
                 impacts,
-                raw.baselineRiskScore()
+                raw.baselineRiskScore(),
+                List.of(),
+                null
         );
     }
 

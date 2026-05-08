@@ -4,7 +4,6 @@ import com.agilerisk.config.AggregationProperties;
 import com.agilerisk.domain.AggregatedRiskResult;
 import com.agilerisk.domain.RiskPrediction;
 import com.agilerisk.domain.Sprint;
-import com.agilerisk.domain.enums.ModelType;
 import com.agilerisk.domain.enums.RiskLevel;
 import com.agilerisk.dto.ai.ModelOutcome;
 import com.agilerisk.repository.AggregatedRiskResultRepository;
@@ -26,24 +25,32 @@ public class RiskAggregationService {
     private final AiModelResponseRepository responseRepo;
 
     @Transactional
-    public AggregatedRiskResult aggregate(Sprint sprint, ModelOutcome overBudget, ModelOutcome requirementChange) {
+    public AggregatedRiskResult aggregate(Sprint sprint,
+                                          ModelOutcome overBudget,
+                                          ModelOutcome requirementChange,
+                                          ModelOutcome communicationCollaboration) {
         UUID evaluationId = UUID.randomUUID();
 
-        RiskPrediction overBudgetPred = persistPrediction(sprint, overBudget);
-        RiskPrediction requirementPred = persistPrediction(sprint, requirementChange);
+        persistPrediction(sprint, overBudget);
+        persistPrediction(sprint, requirementChange);
+        persistPrediction(sprint, communicationCollaboration);
 
-        double w1 = props.getWeights().getOverBudget();
-        double w2 = props.getWeights().getRequirementChange();
-        double normW = w1 + w2;
-        if (normW == 0) { w1 = 0.5; w2 = 0.5; normW = 1.0; }
+        double wOb = props.getWeights().getOverBudget();
+        double wRc = props.getWeights().getRequirementChange();
+        double wCc = props.getWeights().getCommunicationCollaboration();
+        double normW = wOb + wRc + wCc;
+        if (normW == 0) { wOb = wRc = wCc = 1.0/3.0; normW = 1.0; }
 
-        double overall = (w1 * safeScore(overBudget) + w2 * safeScore(requirementChange)) / normW;
-        boolean degraded = overBudget.degraded() || requirementChange.degraded();
+        double overall = (wOb * safeScore(overBudget)
+                         + wRc * safeScore(requirementChange)
+                         + wCc * safeScore(communicationCollaboration)) / normW;
 
+        boolean degraded = overBudget.degraded() || requirementChange.degraded() || communicationCollaboration.degraded();
         RiskLevel level = classify(overall);
         if (degraded) level = level.bumpUp();
 
-        String explanation = buildExplanation(overBudget, requirementChange, w1, w2, overall, degraded);
+        String explanation = buildExplanation(overBudget, requirementChange, communicationCollaboration,
+                wOb, wRc, wCc, overall, degraded);
 
         AggregatedRiskResult result = AggregatedRiskResult.builder()
                 .sprint(sprint)
@@ -52,14 +59,16 @@ public class RiskAggregationService {
                 .overallLevel(level)
                 .overBudgetScore(overBudget.riskScore())
                 .requirementChangeScore(requirementChange.riskScore())
+                .communicationCollaborationScore(communicationCollaboration.riskScore())
                 .combinedExplanation(explanation)
                 .degraded(degraded)
                 .build();
         return aggregatedRepo.save(result);
     }
 
-    private RiskPrediction persistPrediction(Sprint sprint, ModelOutcome outcome) {
-        var aiResp = outcome.aiResponseId() == null ? null : responseRepo.findById(outcome.aiResponseId()).orElse(null);
+    private void persistPrediction(Sprint sprint, ModelOutcome outcome) {
+        var aiResp = outcome.aiResponseId() == null ? null
+                : responseRepo.findById(outcome.aiResponseId()).orElse(null);
         RiskPrediction p = RiskPrediction.builder()
                 .sprint(sprint)
                 .modelType(outcome.modelType())
@@ -69,7 +78,7 @@ public class RiskAggregationService {
                 .explanation(outcome.explanation())
                 .aiResponse(aiResp)
                 .build();
-        return predictionRepo.save(p);
+        predictionRepo.save(p);
     }
 
     private double safeScore(ModelOutcome outcome) {
@@ -86,18 +95,24 @@ public class RiskAggregationService {
         return Math.round(v * 100.0) / 100.0;
     }
 
-    private String buildExplanation(ModelOutcome ob, ModelOutcome rc,
-                                    double w1, double w2, double overall, boolean degraded) {
+    private String buildExplanation(ModelOutcome ob, ModelOutcome rc, ModelOutcome cc,
+                                    double wOb, double wRc, double wCc,
+                                    double overall, boolean degraded) {
         StringBuilder sb = new StringBuilder();
-        sb.append(String.format("Overall risk %.2f (weights ob=%.2f, rc=%.2f). ", overall, w1, w2));
-        sb.append("Over-budget: score=").append(fmt(ob.riskScore()))
-                .append(", level=").append(ob.riskLevel());
-        if (ob.explanation() != null) sb.append(" — ").append(ob.explanation());
-        sb.append(". Requirement-change: score=").append(fmt(rc.riskScore()))
-                .append(", level=").append(rc.riskLevel());
-        if (rc.explanation() != null) sb.append(" — ").append(rc.explanation());
-        if (degraded) sb.append(". [DEGRADED: at least one model fell back to a default.]");
-        return sb.toString();
+        sb.append(String.format("Overall risk %.2f (weights ob=%.2f rc=%.2f cc=%.2f). ",
+                overall, wOb, wRc, wCc));
+        appendModel(sb, "Over-budget", ob);
+        appendModel(sb, "Requirement-change", rc);
+        appendModel(sb, "Communication-collab", cc);
+        if (degraded) sb.append("[DEGRADED: at least one model fell back to a default.]");
+        return sb.toString().trim();
+    }
+
+    private void appendModel(StringBuilder sb, String label, ModelOutcome o) {
+        sb.append(label).append(": score=").append(fmt(o.riskScore()))
+          .append(", level=").append(o.riskLevel());
+        if (o.explanation() != null) sb.append(" - ").append(o.explanation());
+        sb.append(". ");
     }
 
     private String fmt(Double d) {

@@ -18,11 +18,16 @@ public record ModelOutcome(
         Integer latencyMs,
         List<RiskFinding> findings,
         List<FeatureImpact> featureImpacts,
-        Double baselineRiskScore
+        Double baselineRiskScore,
+        // Communication & Collaboration specific fields (null/empty for other models)
+        List<String> recommendations,
+        String llmExplanation
 ) {
     public static ModelOutcome fallback(ModelType type, String reason) {
-        return new ModelOutcome(type, 50.0, RiskLevel.UNKNOWN, null,
+        return new ModelOutcome(
+                type, 50.0, RiskLevel.UNKNOWN, null,
                 "Fallback: " + reason, true, null, null,
-                List.of(), List.of(), null);
+                List.of(), List.of(), null,
+                List.of(), null);
     }
 }

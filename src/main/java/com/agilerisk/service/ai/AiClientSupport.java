@@ -59,6 +59,8 @@ public class AiClientSupport {
                 audit != null ? audit.getLatencyMs() : null,
                 java.util.List.of(),
                 java.util.List.of(),
+                null,
+                java.util.List.of(),
                 null
         );
     }

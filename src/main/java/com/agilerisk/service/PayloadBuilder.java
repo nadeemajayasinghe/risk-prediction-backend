@@ -5,8 +5,10 @@ import com.agilerisk.domain.Sprint;
 import com.agilerisk.domain.SprintMetric;
 import com.agilerisk.domain.UserStory;
 import com.agilerisk.domain.enums.ChangeType;
+import com.agilerisk.dto.ai.CommunicationCollaborationModelRequest;
 import com.agilerisk.dto.ai.OverBudgetModelRequest;
 import com.agilerisk.dto.ai.RequirementChangeModelRequest;
+import com.agilerisk.repository.TaskRepository;
 import com.agilerisk.repository.CommentRepository;
 import com.agilerisk.repository.RequirementChangeRepository;
 import com.agilerisk.repository.SprintMetricRepository;
@@ -29,6 +31,7 @@ public class PayloadBuilder {
     private final UserStoryRepository storyRepo;
     private final CommentRepository commentRepo;
     private final RequirementChangeRepository changeRepo;
+    private final TaskRepository taskRepo;
 
     @Transactional(readOnly = true)
     public OverBudgetModelRequest buildOverBudget(Sprint sprint) {
@@ -121,6 +124,40 @@ public class PayloadBuilder {
                 crCount,
                 totalComments,
                 round4(volatility)
+        );
+    }
+
+    /**
+     * Builds the 5-feature payload required by the Communication & Collaboration scorer.
+     *
+     * <ul>
+     *   <li><b>avg_response_time</b>: latest sprint_metrics.avg_response_time_hours (or 0)</li>
+     *   <li><b>comments_per_task</b>: total comments / total tasks for this sprint (rounded down)</li>
+     *   <li><b>inactive_days</b>: latest sprint_metrics.inactive_days (or 0)</li>
+     *   <li><b>blockers</b>: latest sprint_metrics.blocked_tasks (or 0)</li>
+     *   <li><b>reopened_tasks</b>: latest sprint_metrics.reopened_tasks (or 0)</li>
+     * </ul>
+     */
+    @Transactional(readOnly = true)
+    public CommunicationCollaborationModelRequest buildCommunicationCollaboration(Sprint sprint) {
+        SprintMetric latest = metricRepo.findBySprintIdOrderByRecordedAtDesc(sprint.getId())
+                .stream().findFirst().orElse(null);
+
+        List<UserStory> stories = storyRepo.findBySprintId(sprint.getId());
+        int totalTasks = stories.stream()
+                .mapToInt(s -> taskRepo.findByStoryId(s.getId()).size())
+                .sum();
+        int totalComments = stories.stream()
+                .mapToInt(s -> commentRepo.findByStoryId(s.getId()).size())
+                .sum();
+        int commentsPerTask = totalTasks > 0 ? totalComments / totalTasks : 0;
+
+        return new CommunicationCollaborationModelRequest(
+                latest != null ? nz(latest.getAvgResponseTimeHours()) : 0,
+                commentsPerTask,
+                latest != null ? nz(latest.getInactiveDays()) : 0,
+                latest != null ? nz(latest.getBlockedTasks()) : 0,
+                latest != null ? nz(latest.getReopenedTasks()) : 0
         );
     }
 

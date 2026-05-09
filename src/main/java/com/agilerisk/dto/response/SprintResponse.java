@@ -18,6 +18,7 @@ public record SprintResponse(
         Integer teamSize,
         Double complexity,
         Double baseVelocity,
+        Double sprintCapacityHours,
         Instant createdAt,
         Instant updatedAt
 ) { }

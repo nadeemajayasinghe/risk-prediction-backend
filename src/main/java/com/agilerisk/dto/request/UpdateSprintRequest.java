@@ -15,5 +15,6 @@ public record UpdateSprintRequest(
         String teamType,
         Integer teamSize,
         Double complexity,
-        Double baseVelocity
+        Double baseVelocity,
+        Double sprintCapacityHours
 ) { }

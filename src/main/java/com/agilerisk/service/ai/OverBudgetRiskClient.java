@@ -7,6 +7,7 @@ import com.agilerisk.domain.enums.RiskLevel;
 import com.agilerisk.dto.ai.ModelOutcome;
 import com.agilerisk.dto.ai.OverBudgetModelRequest;
 import com.agilerisk.dto.ai.OverBudgetModelResponse;
+import com.agilerisk.dto.response.FeatureImpact;
 import com.agilerisk.dto.response.RiskFinding;
 import com.agilerisk.service.explain.OverBudgetExplainer;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
@@ -68,13 +69,12 @@ public class OverBudgetRiskClient implements AiModelClient<OverBudgetModelReques
         if (raw == null) {
             return ModelOutcome.fallback(ModelType.OVER_BUDGET, "Empty response");
         }
-        RiskLevel level = parseLevel(raw.riskLabel());
+        RiskLevel level = parseLevel(raw.riskLevel());
         double riskScore = computeRiskScore(raw);
         Double topProb = topProbability(raw);
         String explanation = buildExplanation(raw);
         List<RiskFinding> findings = explainer.explain(request);
-        List<com.agilerisk.dto.response.FeatureImpact> impacts =
-                raw.featureImpacts() != null ? raw.featureImpacts() : List.of();
+        List<FeatureImpact> impacts = raw.featureImpacts() != null ? raw.featureImpacts() : List.of();
         return new ModelOutcome(
                 ModelType.OVER_BUDGET,
                 riskScore,
@@ -93,29 +93,29 @@ public class OverBudgetRiskClient implements AiModelClient<OverBudgetModelReques
     }
 
     /**
-     * Single 0–100 score derived from the class probabilities.
-     * Weighted average over class severities (Low=0, Medium=50, High=100), so it stays meaningful
-     * even when the predicted class confidence is borderline.
+     * 0–100 risk score derived from class probabilities (matches existing aggregator convention):
+     * {@code 50·P(Medium) + 100·P(High)}.
      */
     private double computeRiskScore(OverBudgetModelResponse raw) {
-        OverBudgetModelResponse.Probabilities p = raw.probabilities();
+        OverBudgetModelResponse.ClassProbabilities p = raw.classProbabilities();
         if (p == null) {
-            return raw.confidence() != null ? raw.confidence() : 50.0;
+            // Fallback: use probability_overbudget × 100 if class probs missing
+            return raw.probabilityOverbudget() != null ? raw.probabilityOverbudget() * 100.0 : 50.0;
         }
         double low = nullSafe(p.low());
         double med = nullSafe(p.medium());
         double high = nullSafe(p.high());
         double total = low + med + high;
         if (total <= 0) {
-            return raw.confidence() != null ? raw.confidence() : 50.0;
+            return raw.probabilityOverbudget() != null ? raw.probabilityOverbudget() * 100.0 : 50.0;
         }
         double weighted = (med * 50.0 + high * 100.0) / total;
         return Math.round(weighted * 100.0) / 100.0;
     }
 
     private Double topProbability(OverBudgetModelResponse raw) {
-        OverBudgetModelResponse.Probabilities p = raw.probabilities();
-        if (p == null) return null;
+        OverBudgetModelResponse.ClassProbabilities p = raw.classProbabilities();
+        if (p == null) return raw.probabilityOverbudget();
         double low = nullSafe(p.low());
         double med = nullSafe(p.medium());
         double high = nullSafe(p.high());
@@ -133,12 +133,13 @@ public class OverBudgetRiskClient implements AiModelClient<OverBudgetModelReques
     }
 
     private String buildExplanation(OverBudgetModelResponse raw) {
-        OverBudgetModelResponse.Probabilities p = raw.probabilities();
+        OverBudgetModelResponse.ClassProbabilities p = raw.classProbabilities();
+        double pob = raw.probabilityOverbudget() == null ? 0.0 : raw.probabilityOverbudget();
         if (p == null) {
-            return String.format("Predicted %s (confidence %.2f%%)", raw.riskLabel(), nullSafe(raw.confidence()));
+            return String.format("Predicted %s (P(over-budget)=%.3f)", raw.riskLevel(), pob);
         }
-        return String.format("Predicted %s (confidence %.2f%%). P(Low)=%.3f, P(Medium)=%.3f, P(High)=%.3f",
-                raw.riskLabel(), nullSafe(raw.confidence()),
+        return String.format("Predicted %s (P(over-budget)=%.3f). P(Low)=%.3f, P(Medium)=%.3f, P(High)=%.3f",
+                raw.riskLevel(), pob,
                 nullSafe(p.low()), nullSafe(p.medium()), nullSafe(p.high()));
     }
 

@@ -18,5 +18,6 @@ public record CreateSprintRequest(
         String teamType,
         @PositiveOrZero Integer teamSize,
         @PositiveOrZero Double complexity,
-        @PositiveOrZero Double baseVelocity
+        @PositiveOrZero Double baseVelocity,
+        @PositiveOrZero Double sprintCapacityHours
 ) { }

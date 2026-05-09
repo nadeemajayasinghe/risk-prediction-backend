@@ -8,10 +8,11 @@ import com.agilerisk.domain.enums.ChangeType;
 import com.agilerisk.dto.ai.CommunicationCollaborationModelRequest;
 import com.agilerisk.dto.ai.OverBudgetModelRequest;
 import com.agilerisk.dto.ai.RequirementChangeModelRequest;
-import com.agilerisk.repository.TaskRepository;
 import com.agilerisk.repository.CommentRepository;
 import com.agilerisk.repository.RequirementChangeRepository;
 import com.agilerisk.repository.SprintMetricRepository;
+import com.agilerisk.repository.SprintRepository;
+import com.agilerisk.repository.TaskRepository;
 import com.agilerisk.repository.UserStoryRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -21,62 +22,151 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.util.Comparator;
 import java.util.List;
 
 @Component
 @RequiredArgsConstructor
 public class PayloadBuilder {
 
+    private final SprintRepository sprintRepo;
     private final SprintMetricRepository metricRepo;
     private final UserStoryRepository storyRepo;
     private final CommentRepository commentRepo;
     private final RequirementChangeRepository changeRepo;
     private final TaskRepository taskRepo;
 
+    /**
+     * Builds the 17-feature payload for the over-budget v2 model.
+     *
+     * <p>Features come from three places:</p>
+     * <ul>
+     *   <li><b>Current sprint plan</b>: team_type, team_size, base_velocity, complexity,
+     *       sprint_capacity_hours (Sprint entity); committed_story_points + planned_hours
+     *       (computed from current stories + tasks)</li>
+     *   <li><b>Current sprint observations</b>: fatigue (latest SprintMetric); scope_added
+     *       (count of SCOPE_ADDED RequirementChange rows)</li>
+     *   <li><b>Previous sprint history</b> (same team_id, prior start_date):
+     *       prev_carry_over_*, prev_rework_score, prev_blocked_tasks, prev_reopened_tasks,
+     *       velocity_rolling_prev (rolling avg over up to 3 prior sprints), velocity_trend
+     *       (slope between last two sprints).</li>
+     * </ul>
+     *
+     * <p>If the team has no prior sprint, all <code>prev_*</code> features default to 0
+     * and <code>velocity_rolling_prev</code> falls back to <code>base_velocity</code>.</p>
+     */
     @Transactional(readOnly = true)
     public OverBudgetModelRequest buildOverBudget(Sprint sprint) {
+        // ----- Current-sprint plan inputs -----
+        List<UserStory> stories = storyRepo.findBySprintId(sprint.getId());
+        double committedPoints = stories.stream()
+                .mapToInt(s -> nz(s.getStoryPoints()))
+                .sum();
+        double plannedHours = stories.stream()
+                .flatMap(s -> taskRepo.findByStoryId(s.getId()).stream())
+                .mapToDouble(t -> nz(t.getEstimatedHours()))
+                .sum();
+        double sprintCapacityHours = nz(sprint.getSprintCapacityHours());
+        double hoursPerPoint = committedPoints > 0
+                ? plannedHours / committedPoints
+                : 0.0;
+
+        // ----- Current observations -----
         SprintMetric latest = metricRepo.findBySprintIdOrderByRecordedAtDesc(sprint.getId())
                 .stream().findFirst().orElse(null);
+        double fatigue = latest != null ? nz(latest.getFatigue()) : 0.0;
 
-        long scopeAdded = changeRepo.findBySprintIdOrderByChangedAtDesc(sprint.getId()).stream()
+        long scopeAddedCount = changeRepo.findBySprintIdOrderByChangedAtDesc(sprint.getId()).stream()
                 .filter(c -> c.getChangeType() == ChangeType.SCOPE_ADDED)
                 .count();
 
-        int planned   = nz(latest == null ? null : latest.getPlannedPoints());
-        int completed = nz(latest == null ? null : latest.getCompletedPoints());
+        // ----- Previous-sprint history -----
+        PrevStats prev = computePreviousStats(sprint);
 
         return new OverBudgetModelRequest(
                 emptyIfNull(sprint.getTeamType()),
-                nz(sprint.getBaseVelocity()),
                 nz(sprint.getTeamSize()),
+                nz(sprint.getBaseVelocity()),
                 nz(sprint.getComplexity()),
-                Math.max(0, planned - completed),
-                latest != null ? nz(latest.getVelocity()) : 0.0,
-                completed,
-                latest != null ? nz(latest.getEffortDeviation()) : 0.0,
-                latest != null ? nz(latest.getReworkScore()) : 0.0,
-                latest != null ? nz(latest.getBlockedTasks()) : 0,
-                latest != null ? nz(latest.getReopenedTasks()) : 0,
-                scopeAdded,
-                latest != null ? nz(latest.getFatigue()) : 0.0
+                round4(hoursPerPoint),
+                round4(sprintCapacityHours),
+                round4(plannedHours),
+                round4(committedPoints),
+                round4(prev.velocityRollingPrev),
+                round4(prev.velocityTrend),
+                round4(prev.carryOverPoints),
+                round4(prev.carryOverRate),
+                round4(prev.reworkScore),
+                round4(prev.blockedTasks),
+                round4(prev.reopenedTasks),
+                round4(fatigue),
+                scopeAddedCount
         );
     }
 
-    /**
-     * Builds the 7-feature payload required by the requirement-change model.
-     * Features are derived from existing sprint data:
-     *
-     * <ul>
-     *   <li><b>baseline_story_count</b>: stories created before/at sprint start</li>
-     *   <li><b>updated_story_count</b>: stories whose latest update happened materially after creation
-     *       (proxy: updated_at &gt; created_at + 60s) OR after the sprint started</li>
-     *   <li><b>story_change_ratio</b>: updated / max(baseline, 1)</li>
-     *   <li><b>acceptance_criteria_changes</b>: requirement_changes rows of type ACCEPTANCE_CRITERIA_CHANGED</li>
-     *   <li><b>change_requests_count</b>: total requirement_changes rows for this sprint</li>
-     *   <li><b>comments_on_stories</b>: total comments across all stories in the sprint</li>
-     *   <li><b>requirement_volatility_score</b>: change_requests / baseline_story_count, capped at 1.0</li>
-     * </ul>
-     */
+    /** Encapsulated previous-sprint history derived from up to 3 prior sprints. */
+    private record PrevStats(
+            double velocityRollingPrev,
+            double velocityTrend,
+            double carryOverPoints,
+            double carryOverRate,
+            double reworkScore,
+            double blockedTasks,
+            double reopenedTasks
+    ) { }
+
+    private PrevStats computePreviousStats(Sprint current) {
+        if (current.getTeamId() == null || current.getStartDate() == null) {
+            return new PrevStats(nz(current.getBaseVelocity()), 0, 0, 0, 0, 0, 0);
+        }
+        List<Sprint> prior = sprintRepo.findPreviousSprints(current.getTeamId(), current.getStartDate());
+        if (prior.isEmpty()) {
+            return new PrevStats(nz(current.getBaseVelocity()), 0, 0, 0, 0, 0, 0);
+        }
+        Sprint prev = prior.get(0);
+        SprintMetric prevMetric = metricRepo.findBySprintIdOrderByRecordedAtDesc(prev.getId())
+                .stream().findFirst().orElse(null);
+
+        double prevVelocity = prevMetric != null ? nz(prevMetric.getVelocity()) : nz(prev.getBaseVelocity());
+        double prevPlanned = prevMetric != null ? nz(prevMetric.getPlannedPoints()) : 0.0;
+        double prevCompleted = prevMetric != null ? nz(prevMetric.getCompletedPoints()) : 0.0;
+        double carryOverPoints = Math.max(0.0, prevPlanned - prevCompleted);
+        double carryOverRate = prevPlanned > 0 ? carryOverPoints / prevPlanned : 0.0;
+        double reworkScore = prevMetric != null ? nz(prevMetric.getReworkScore()) : 0.0;
+        double blockedTasks = prevMetric != null ? nz(prevMetric.getBlockedTasks()) : 0.0;
+        double reopenedTasks = prevMetric != null ? nz(prevMetric.getReopenedTasks()) : 0.0;
+
+        // Rolling average over up to the 3 most recent prior sprints
+        List<Double> recentVelocities = prior.stream()
+                .limit(3)
+                .map(s -> metricRepo.findBySprintIdOrderByRecordedAtDesc(s.getId()).stream()
+                        .findFirst()
+                        .map(m -> nz(m.getVelocity()))
+                        .orElse(nz(s.getBaseVelocity())))
+                .toList();
+        double rolling = recentVelocities.isEmpty()
+                ? prevVelocity
+                : recentVelocities.stream().mapToDouble(Double::doubleValue).average().orElse(prevVelocity);
+
+        // Trend = slope between the two most recent sprints (positive = improving)
+        double trend = 0.0;
+        if (recentVelocities.size() >= 2) {
+            trend = recentVelocities.get(0) - recentVelocities.get(1);
+        }
+
+        return new PrevStats(
+                rolling,
+                trend,
+                carryOverPoints,
+                Math.min(1.0, carryOverRate),
+                reworkScore,
+                blockedTasks,
+                reopenedTasks
+        );
+    }
+
+    // ---- Requirement-Change side (unchanged) -----------------------------------
+
     @Transactional(readOnly = true)
     public RequirementChangeModelRequest buildRequirementChange(Sprint sprint) {
         List<UserStory> stories = storyRepo.findBySprintId(sprint.getId());
@@ -90,8 +180,6 @@ public class PayloadBuilder {
                 .filter(s -> s.getCreatedAt() != null && !s.getCreatedAt().isAfter(sprintStart))
                 .count();
         if (baselineCount == 0 && !stories.isEmpty()) {
-            // Fall back to total stories — handles the common case where stories were created
-            // close to or just after sprint start during ingestion testing.
             baselineCount = stories.size();
         }
 
@@ -127,17 +215,8 @@ public class PayloadBuilder {
         );
     }
 
-    /**
-     * Builds the 5-feature payload required by the Communication & Collaboration scorer.
-     *
-     * <ul>
-     *   <li><b>avg_response_time</b>: latest sprint_metrics.avg_response_time_hours (or 0)</li>
-     *   <li><b>comments_per_task</b>: total comments / total tasks for this sprint (rounded down)</li>
-     *   <li><b>inactive_days</b>: latest sprint_metrics.inactive_days (or 0)</li>
-     *   <li><b>blockers</b>: latest sprint_metrics.blocked_tasks (or 0)</li>
-     *   <li><b>reopened_tasks</b>: latest sprint_metrics.reopened_tasks (or 0)</li>
-     * </ul>
-     */
+    // ---- Communication & Collaboration side (unchanged) ------------------------
+
     @Transactional(readOnly = true)
     public CommunicationCollaborationModelRequest buildCommunicationCollaboration(Sprint sprint) {
         SprintMetric latest = metricRepo.findBySprintIdOrderByRecordedAtDesc(sprint.getId())
@@ -166,6 +245,9 @@ public class PayloadBuilder {
     private static String emptyIfNull(String v) { return v == null ? "" : v; }
     private static double round4(double v) { return Math.round(v * 10000.0) / 10000.0; }
 
+    // Reserved for potential date-utility refactors.
     @SuppressWarnings("unused")
-    private static LocalDate atStart(LocalDate d) { return d; } // reserved for future date utilities
+    private static LocalDate atStart(LocalDate d) { return d; }
+    @SuppressWarnings("unused")
+    private static Comparator<Object> reserved() { return (a, b) -> 0; }
 }

@@ -38,6 +38,7 @@ public class SprintService {
                 .teamSize(req.teamSize())
                 .complexity(req.complexity())
                 .baseVelocity(req.baseVelocity())
+                .sprintCapacityHours(req.sprintCapacityHours())
                 .build();
         return mapper.toResponse(repo.save(sprint));
     }
@@ -66,6 +67,7 @@ public class SprintService {
         if (req.teamSize() != null) s.setTeamSize(req.teamSize());
         if (req.complexity() != null) s.setComplexity(req.complexity());
         if (req.baseVelocity() != null) s.setBaseVelocity(req.baseVelocity());
+        if (req.sprintCapacityHours() != null) s.setSprintCapacityHours(req.sprintCapacityHours());
         if (s.getEndDate().isBefore(s.getStartDate())) {
             throw new BusinessRuleException("endDate must be on/after startDate");
         }

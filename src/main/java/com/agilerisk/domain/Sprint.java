@@ -55,6 +55,9 @@ public class Sprint extends Auditable {
     @Column(name = "base_velocity")
     private Double baseVelocity;
 
+    @Column(name = "sprint_capacity_hours")
+    private Double sprintCapacityHours;
+
     @OneToMany(mappedBy = "sprint", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default
     private List<SprintMetric> metrics = new ArrayList<>();
